@@ -1,0 +1,416 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  globals.css
+  layout.tsx
+  page.tsx
+  useLocalSubscriptions.ts
+CLAUDE.md
+next-env.d.ts
+next.config.js
+package.json
+README.md
+tsconfig.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="app/globals.css">
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+</file>
+
+<file path="app/layout.tsx">
+import './globals.css';
+
+export const metadata = {
+  title: 'Подписки',
+  description: 'Управление подписками',
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="ru">
+      <body>{children}</body>
+    </html>
+  );
+}
+</file>
+
+<file path="app/page.tsx">
+"use client";
+import { useState, useEffect } from "react";
+import { useLocalSubscriptions, Subscription } from "./useLocalSubscriptions";
+
+export default function Page() {
+  const { subs, setSubs, isClientMounted } = useLocalSubscriptions();
+  // Инициализируем form с пустым startDate для предотвращения проблем с гидратацией
+  const [form, setForm] = useState<Partial<Subscription>>({
+    startDate: "",
+    period: 30,
+  });
+  const [, setUpdateTrigger] = useState(0);
+
+  // Устанавливаем текущую дату для новых форм только после монтирования на клиенте
+  useEffect(() => {
+    if (isClientMounted && !form.id && !form.startDate) {
+      setForm(prevForm => ({
+        ...prevForm,
+        startDate: new Date().toISOString().slice(0, 10)
+      }));
+    }
+  }, [isClientMounted, form.id, form.startDate]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setUpdateTrigger(prev => prev + 1);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const save = () => {
+    if (!form.title || !form.amount) return;
+    const id = form.id ?? Date.now();
+    const next: Subscription = { ...form, id } as Subscription;
+    setSubs(prev =>
+      prev.some(s => s.id === id)
+        ? prev.map(s => (s.id === id ? next : s))
+        : [...prev, next],
+    );
+    // Сбрасываем форму с пустым startDate, он будет установлен через useEffect
+    setForm({ startDate: "", period: 30 });
+  };
+
+  const daysLeft = (s: Subscription) =>
+    Math.ceil(
+      (new Date(s.startDate).getTime() + s.period * 86_400_000 - Date.now()) /
+        86_400_000,
+    );
+
+  return (
+    <main className="max-w-xl mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-4">📅 Подписки</h1>
+
+      <div className="space-y-2 mb-6">
+        <input
+          className="border p-2 w-full"
+          placeholder="Название"
+          value={form.title ?? ""}
+          onChange={e => setForm({ ...form, title: e.target.value })}
+        />
+        <input
+          type="number"
+          className="border p-2 w-full"
+          placeholder="Сумма"
+          value={form.amount ?? ""}
+          onChange={e => setForm({ ...form, amount: +e.target.value })}
+        />
+        <input
+          type="date"
+          className="border p-2 w-full"
+          value={form.startDate}
+          onChange={e => setForm({ ...form, startDate: e.target.value })}
+        />
+        <input
+          type="number"
+          className="border p-2 w-full"
+          placeholder="Период (дней)"
+          value={form.period}
+          onChange={e => setForm({ ...form, period: +e.target.value })}
+        />
+        <button
+          className="bg-blue-600 text-white px-4 py-2 rounded"
+          onClick={save}
+        >
+          Сохранить
+        </button>
+      </div>
+
+      <table className="w-full border">
+        <thead>
+          <tr className="bg-gray-100">
+            <th className="p-2 text-left">Название</th>
+            <th className="p-2 text-left">Сумма</th>
+            <th className="p-2 text-left">Осталось дней</th>
+          </tr>
+        </thead>
+        <tbody>
+          {!isClientMounted && (
+            <tr>
+              <td colSpan={3} className="p-2 text-center text-gray-500">
+                Загрузка подписок...
+              </td>
+            </tr>
+          )}
+          {isClientMounted && subs.length === 0 && (
+            <tr>
+              <td colSpan={3} className="p-2 text-center text-gray-500">
+                Нет подписок. Добавьте первую.
+              </td>
+            </tr>
+          )}
+          {isClientMounted && subs.map(s => (
+            <tr
+              key={s.id}
+              className="border-t hover:bg-gray-50 cursor-pointer"
+              onClick={() => setForm(s)}
+            >
+              <td className="p-2">{s.title}</td>
+              <td className="p-2">{s.amount}</td>
+              <td className="p-2">{daysLeft(s)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </main>
+  );
+}
+</file>
+
+<file path="app/useLocalSubscriptions.ts">
+import { useState, useEffect } from "react";
+
+export type Subscription = {
+  id: number;
+  title: string;
+  amount: number;
+  startDate: string;
+  period: number;
+};
+
+export function useLocalSubscriptions() {
+  // Инициализируем состояние пустым массивом для обеспечения одинакового рендера на сервере и клиенте
+  const [subs, setSubs] = useState<Subscription[]>([]);
+  // Отслеживаем, был ли компонент смонтирован на клиенте
+  const [isClientMounted, setIsClientMounted] = useState(false);
+
+  useEffect(() => {
+    // Этот эффект выполнится только на клиенте после первого рендера
+    setIsClientMounted(true);
+    try {
+      const storedSubs = localStorage.getItem("subscriptions");
+      if (storedSubs) {
+        setSubs(JSON.parse(storedSubs));
+      }
+    } catch (error) {
+      console.error("Failed to parse subscriptions from localStorage:", error);
+      // В случае ошибки парсинга, оставляем subs пустым массивом
+    }
+  }, []); // Пустой массив зависимостей - запуск один раз после монтирования
+
+  useEffect(() => {
+    // Сохраняем в localStorage только на клиенте и если состояние subs изменилось
+    if (isClientMounted) {
+      localStorage.setItem("subscriptions", JSON.stringify(subs));
+    }
+  }, [subs, isClientMounted]);
+
+  return { subs, setSubs, isClientMounted };
+}
+</file>
+
+<file path="CLAUDE.md">
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+This is a Next.js subscription management application (MVP) that allows users to track recurring subscriptions with automatic calculation of remaining days until next payment. The app uses browser localStorage for data persistence.
+
+## Development Commands
+
+```bash
+npm install      # Install dependencies
+npm run dev      # Start development server (http://localhost:3000)
+npm run build    # Build for production
+npm start        # Start production server
+```
+
+## Architecture
+
+### Data Flow
+1. **useLocalSubscriptions hook** (app/useLocalSubscriptions.ts) manages subscription data in localStorage
+2. **Page component** (app/page.tsx) handles UI state and CRUD operations
+3. All data is stored client-side in localStorage under the key "subscriptions"
+
+### Key Components
+- **app/page.tsx**: Main subscription management interface
+  - Form for adding/editing subscriptions
+  - Table displaying all subscriptions with calculated days remaining
+  - Auto-refresh every minute to update "days remaining"
+  - Click-to-edit functionality on table rows
+
+- **app/useLocalSubscriptions.ts**: Custom hook for localStorage persistence
+  - Provides `subs` state and `setSubs` function
+  - Automatically syncs changes to localStorage
+
+### Data Model
+```typescript
+type Subscription = {
+  id: number;
+  title: string;
+  amount: number;
+  startDate: string;
+  period: number; // in days
+}
+```
+
+## Important Notes
+
+- The application is entirely client-side with no backend
+- Tailwind CSS is loaded via CDN in app/layout.tsx
+- UI text is in Russian
+- Designed for deployment on Vercel
+- Days remaining calculation: Math.max(0, period - daysSinceStart)
+</file>
+
+<file path="next-env.d.ts">
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+</file>
+
+<file path="next.config.js">
+/** @type {import('next').NextConfig} */
+const nextConfig = {}
+
+module.exports = nextConfig
+</file>
+
+<file path="package.json">
+{
+  "name": "subscriptions",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.4",
+    "tailwindcss": "^4.1.8",
+    "typescript": "latest"
+  }
+}
+</file>
+
+<file path="README.md">
+# Подписки - MVP
+
+## Установка и запуск
+
+1. Установите зависимости:
+```bash
+npm install
+```
+
+2. Запустите проект в режиме разработки:
+```bash
+npm run dev
+```
+
+3. Откройте браузер по адресу: http://localhost:3000
+
+## Функциональность
+
+- Добавление подписок с названием, суммой, датой начала и периодом
+- Сохранение данных в localStorage
+- Автоматическое обновление счетчика "осталось дней" каждую минуту
+- Редактирование подписок по клику на строку в таблице
+
+## Деплой на Vercel
+
+1. Push проект в GitHub
+2. Импортируйте проект на Vercel
+3. Deploy без дополнительных настроек
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "es5",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+</file>
+
+</files>

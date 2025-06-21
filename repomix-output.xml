@@ -131,53 +131,45 @@ export async function saveSubscription(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser()
   
   if (!user) {
-    throw new Error('Not authenticated')
+    return { error: 'Пользователь не авторизован' }
   }
 
-  const title = formData.get('title') as string
-  const amount = parseFloat(formData.get('amount') as string)
-  const start_date = formData.get('startDate') as string
-  const period = parseInt(formData.get('period') as string)
   const id = formData.get('id') as string
-
-  // Basic validation
-  if (!title || !amount || !start_date || !period) {
-    throw new Error('All fields are required')
-  }
-
   const subscriptionData = {
-    title,
-    amount,
-    start_date,
-    period,
+    title: formData.get('title') as string,
+    amount: parseFloat(formData.get('amount') as string),
+    start_date: formData.get('startDate') as string,
+    period: parseInt(formData.get('period') as string),
     user_id: user.id,
   }
 
+  // Basic validation
+  if (!subscriptionData.title || !subscriptionData.amount || !subscriptionData.start_date || !subscriptionData.period) {
+    return { error: 'Все поля обязательны для заполнения' }
+  }
+
+  let error
   if (id) {
     // Update existing subscription
-    const { error } = await supabase
+    ({ error } = await supabase
       .from('subscriptions')
       .update(subscriptionData)
       .eq('id', id)
-      .eq('user_id', user.id) // Ensure user can only update their own subscriptions
-
-    if (error) {
-      console.error('Error updating subscription:', error)
-      throw new Error('Failed to update subscription')
-    }
+      .eq('user_id', user.id)) // Ensure user can only update their own subscriptions
   } else {
     // Create new subscription
-    const { error } = await supabase
+    ({ error } = await supabase
       .from('subscriptions')
-      .insert(subscriptionData)
+      .insert(subscriptionData))
+  }
 
-    if (error) {
-      console.error('Error creating subscription:', error)
-      throw new Error('Failed to create subscription')
-    }
+  if (error) {
+    console.error('Save subscription error:', error)
+    return { error: 'Не удалось сохранить подписку' }
   }
 
   revalidatePath('/')
+  return { success: true }
 }
 
 export async function deleteSubscription(id: string) {
@@ -185,7 +177,11 @@ export async function deleteSubscription(id: string) {
   const { data: { user } } = await supabase.auth.getUser()
   
   if (!user) {
-    throw new Error('Not authenticated')
+    return { error: 'Пользователь не авторизован' }
+  }
+
+  if (!id) {
+    return { error: 'Необходим ID для удаления' }
   }
 
   const { error } = await supabase
@@ -196,10 +192,11 @@ export async function deleteSubscription(id: string) {
 
   if (error) {
     console.error('Error deleting subscription:', error)
-    throw new Error('Failed to delete subscription')
+    return { error: 'Не удалось удалить подписку' }
   }
 
   revalidatePath('/')
+  return { success: true }
 }
 
 export async function signIn(formData: FormData) {
@@ -275,8 +272,8 @@ const EXCHANGE_RATE_USD_TO_RUB = 90.0
 type Props = {
   user: User | null
   initialSubscriptions: Subscription[]
-  saveSubscriptionAction: (formData: FormData) => Promise<void>
-  deleteSubscriptionAction: (id: string) => Promise<void>
+  saveSubscriptionAction: (formData: FormData) => Promise<{ error?: string; success?: boolean } | undefined>
+  deleteSubscriptionAction: (id: string) => Promise<{ error?: string; success?: boolean } | undefined>
   signOutAction: () => Promise<void>
 }
 
@@ -531,18 +528,19 @@ export default function DashboardClient({
     e.preventDefault()
     
     const formData = new FormData(e.currentTarget)
+    const form = e.currentTarget
     
     startTransition(async () => {
-      try {
-        await saveSubscriptionAction(formData)
+      const result = await saveSubscriptionAction(formData)
+      if (result?.error) {
+        console.error('Failed to save subscription:', result.error)
+        alert(`Ошибка при сохранении: ${result.error}`)
+      } else {
         setForm({
           start_date: new Date().toISOString().slice(0, 10),
           period: 30,
         })
-        e.currentTarget.reset()
-      } catch (error) {
-        console.error('Failed to save subscription:', error)
-        alert('Ошибка при сохранении подписки')
+        form.reset()
       }
     })
   }
@@ -550,12 +548,13 @@ export default function DashboardClient({
   const handleDelete = async (id: string) => {
     if (confirm('Удалить эту подписку?')) {
       startTransition(async () => {
-        try {
-          await deleteSubscriptionAction(id)
-        } catch (error) {
-          console.error('Failed to delete subscription:', error)
-          alert('Ошибка при удалении подписки')
+        const result = await deleteSubscriptionAction(id)
+        if (result?.error) {
+          console.error('Failed to delete subscription:', result.error)
+          alert(`Ошибка при удалении: ${result.error}`)
         }
+        // В случае успеха, UI обновится автоматически благодаря revalidatePath на сервере
+        // и/или realtime подписке.
       })
     }
   }
@@ -742,6 +741,28 @@ export default function DashboardClient({
 }
 </file>
 
+<file path="app/layout.tsx">
+export const metadata = {
+  title: 'Подписки',
+  description: 'Управление подписками',
+}
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="ru">
+      <head>
+        <script src="https://cdn.tailwindcss.com"></script>
+      </head>
+      <body>{children}</body>
+    </html>
+  )
+}
+</file>
+
 <file path="utils/supabase/client.ts">
 import { createBrowserClient } from '@supabase/ssr'
 
@@ -788,121 +809,6 @@ export async function createClient() {
 <file path=".env.local.example">
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-</file>
-
-<file path="middleware.ts">
-import { createServerClient } from '@supabase/ssr'
-import { NextResponse, type NextRequest } from 'next/server'
-
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  })
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
-          response = NextResponse.next({
-            request,
-          })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
-
-  // IMPORTANT: You *must* call getUser() to refresh the session
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  return response
-}
-
-export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * Feel free to modify this pattern to include more paths.
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
-}
-</file>
-
-<file path="app/layout.tsx">
-export const metadata = {
-  title: 'Подписки',
-  description: 'Управление подписками',
-}
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return (
-    <html lang="ru">
-      <head>
-        <script src="https://cdn.tailwindcss.com"></script>
-      </head>
-      <body>{children}</body>
-    </html>
-  )
-}
-</file>
-
-<file path=".gitignore">
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
-.yarn/install-state.gz
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# local env files
-.env*.local
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-repomix-output.xml
 </file>
 
 <file path="CLAUDE.md">
@@ -959,6 +865,76 @@ type Subscription = {
 - UI text is in Russian
 - Designed for deployment on Vercel
 - Days remaining calculation: Math.max(0, period - daysSinceStart)
+</file>
+
+<file path="middleware.ts">
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
+
+export const runtime = 'edge'
+
+export async function middleware(request: NextRequest) {
+  try {
+    // Check if Supabase environment variables are configured
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+      console.warn('Supabase environment variables not configured, skipping auth middleware')
+      return NextResponse.next()
+    }
+
+    let response = NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    })
+
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              request.cookies.set(name, value)
+            })
+            response = NextResponse.next({
+              request,
+            })
+            cookiesToSet.forEach(({ name, value, options }) =>
+              response.cookies.set(name, value, options)
+            )
+          },
+        },
+      }
+    )
+
+    // IMPORTANT: You *must* call getUser() to refresh the session
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    return response
+  } catch (error) {
+    console.error('Middleware error:', error)
+    // Return a normal response even if middleware fails
+    return NextResponse.next()
+  }
+}
+
+export const config = {
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * Feel free to modify this pattern to include more paths.
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+}
 </file>
 
 <file path="next.config.js">
@@ -1027,6 +1003,45 @@ npm run dev
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]
 }
+</file>
+
+<file path=".gitignore">
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+repomix-output.xml
 </file>
 
 <file path="app/page.tsx">
